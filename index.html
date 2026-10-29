@@ -34,7 +34,6 @@
       position: relative;
     }
 
-    /* 游戏画布 */
     canvas {
       display: block;
       width: 100%;
@@ -49,7 +48,6 @@
       cursor: pointer;
     }
 
-    /* 控制按钮区 */
     .controls {
       margin-top: 16px;
       width: 100%;
@@ -79,7 +77,6 @@
       transform: scale(0.95);
     }
 
-    /* 剧情对话框 */
     .dialog-overlay {
       position: absolute;
       top: 0;
@@ -156,13 +153,11 @@
   <div class="game-container" id="gameContainer">
     <canvas id="gameCanvas" width="600" height="300"></canvas>
     
-    <!-- 控制按钮 -->
     <div class="controls">
       <div class="ctrl-btn" id="btnLeft">←</div>
       <div class="ctrl-btn" id="btnRight">→</div>
     </div>
 
-    <!-- 剧情对话框遮罩 -->
     <div class="dialog-overlay" id="dialogOverlay">
       <div class="dialog-box">
         <div class="dialog-text" id="dialogText"></div>
@@ -181,10 +176,9 @@
       const dialogText = document.getElementById('dialogText');
       const optionsContainer = document.getElementById('optionsContainer');
 
-      // ---------- 音频合成 (无外部资源) ----------
+      // ---------- 音频合成 ----------
       let audioCtx = null;
       
-      // 初始化音频环境
       function initAudio() {
         if (!audioCtx) {
           audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -194,30 +188,50 @@
         }
       }
 
+      // 合成脚步声 (调整了波形和音量，听起来更实)
+      function playFootstep() {
+        if (!audioCtx) return;
+        const now = audioCtx.currentTime;
+        
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        
+        // 改用方波，模拟硬底鞋踩地的声音
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(160, now);
+        osc.frequency.exponentialRampToValueAtTime(60, now + 0.05);
+        
+        // 音量跟猫叫一样大 (之前是0.1，猫叫是0.15，现在调到0.2)
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+        
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        
+        osc.start(now);
+        osc.stop(now + 0.1);
+      }
+
       // 合成猫叫声
       function playMeow() {
         if (!audioCtx) return;
         const now = audioCtx.currentTime;
         
-        // 主振荡器 (发出“喵”的音调变化)
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
+        const filter = audioCtx.createBiquadFilter();
         
-        osc.type = 'sawtooth'; // 用锯齿波带一点沙哑感
-        // 模拟喵的声调：先升高后降低
+        osc.type = 'sawtooth';
         osc.frequency.setValueAtTime(600, now);
         osc.frequency.linearRampToValueAtTime(900, now + 0.1);
         osc.frequency.linearRampToValueAtTime(700, now + 0.3);
         osc.frequency.linearRampToValueAtTime(400, now + 0.5);
         
-        // 音量包络
         gain.gain.setValueAtTime(0, now);
-        gain.gain.linearRampToValueAtTime(0.15, now + 0.05);
-        gain.gain.setValueAtTime(0.15, now + 0.2);
+        gain.gain.linearRampToValueAtTime(0.2, now + 0.05); // 音量同步调大到0.2
+        gain.gain.setValueAtTime(0.2, now + 0.2);
         gain.gain.linearRampToValueAtTime(0, now + 0.5);
         
-        // 滤波器让声音更像动物 (降低高频)
-        const filter = audioCtx.createBiquadFilter();
         filter.type = 'lowpass';
         filter.frequency.value = 1500;
         
@@ -231,28 +245,22 @@
 
       // ---------- 游戏状态 ----------
       const GROUND_Y = 260;
-      const PLAYER_SPEED = 3;
+      const PLAYER_SPEED = 2.5; 
       
       let player = { 
         x: 100, 
         y: GROUND_Y, 
-        width: 20, 
-        height: 60, 
         dir: 1, 
-        isMoving: false,
+        state: 'idle',
         animTime: 0,
-        state: 'idle' // idle, walking, confused
+        stepTimer: 0 
       };
       
       let cat = { x: 450, y: GROUND_Y, active: true, met: false };
-      
       let keys = { left: false, right: false };
-      let gameState = 'playing'; // playing, dialog
-      
-      // 问号浮动动画
+      let gameState = 'playing'; 
       let questionMarkTime = 0;
 
-      // 剧情数据
       const storyData = {
         'meet_cat': {
           text: '走着走着，你遇到了一只黑猫。它静静地看着你，似乎有话要说。',
@@ -318,12 +326,11 @@
         }
       };
 
-      // ---------- 初始化 ----------
       function init() {
         resetGame();
         requestAnimationFrame(gameLoop);
         
-        // 首次点击任意地方激活音频上下文
+        // 解锁音频
         const activateAudio = () => {
           initAudio();
           document.removeEventListener('click', activateAudio);
@@ -338,6 +345,7 @@
         player.dir = 1;
         player.state = 'idle';
         player.animTime = 0;
+        player.stepTimer = 0;
         cat.x = 450;
         cat.active = true;
         cat.met = false;
@@ -346,18 +354,14 @@
         questionMarkTime = 0;
       }
 
-      // ---------- 剧情触发 ----------
       function triggerStory(nodeId) {
         gameState = 'dialog';
-        player.state = 'idle'; // 对话时停止走动
+        player.state = 'idle'; 
         
         const node = storyData[nodeId];
         if (!node) return;
 
-        // 碰到猫触发叫声
-        if (nodeId === 'meet_cat') {
-          playMeow();
-        }
+        if (nodeId === 'meet_cat') playMeow();
 
         dialogText.textContent = node.text;
         optionsContainer.innerHTML = '';
@@ -367,16 +371,9 @@
           btn.className = 'option-btn';
           btn.textContent = opt.text;
           btn.onclick = () => {
-            // 如果选择了重新开始，或者到达结局，对话结束时叫一声
-            if (opt.next === 'restart' || !storyData[opt.next]) {
-              playMeow();
-            }
-            
-            if (opt.next === 'restart') {
-              resetGame();
-            } else {
-              triggerStory(opt.next);
-            }
+            if (opt.next === 'restart' || !storyData[opt.next]) playMeow();
+            if (opt.next === 'restart') resetGame();
+            else triggerStory(opt.next);
           };
           optionsContainer.appendChild(btn);
         });
@@ -384,7 +381,6 @@
         overlay.classList.add('active');
       }
 
-      // ---------- 更新逻辑 ----------
       function update(dt) {
         if (gameState === 'playing') {
           let moving = false;
@@ -400,50 +396,50 @@
             moving = true;
           }
 
-          // 边界限制
           player.x = Math.max(20, Math.min(canvas.width - 20, player.x));
 
-          // 状态更新
           if (player.state !== 'confused') {
             if (moving) {
               player.state = 'walking';
-              player.animTime += dt * 10; // 行走动画速度
+              player.animTime += dt * 8;
+              
+              player.stepTimer += dt;
+              if (player.stepTimer > 0.35) { // 脚步声节奏稍微放慢一点点，免得吵
+                playFootstep();
+                player.stepTimer = 0;
+              }
             } else {
               player.state = 'idle';
               player.animTime = 0;
+              player.stepTimer = 0;
             }
           }
 
-          // 碰撞检测
           if (cat.active && !cat.met) {
             const dist = Math.abs(player.x - cat.x);
             if (dist < 45) {
               cat.met = true;
-              player.state = 'confused'; // 触发绕绕头动作
-              questionMarkTime = 1.5; // 问号显示1.5秒
+              player.state = 'confused';
+              questionMarkTime = 1.5;
               triggerStory('meet_cat');
             }
           }
         }
 
-        // 问号倒计时
         if (questionMarkTime > 0) {
           questionMarkTime -= dt;
         }
       }
 
-      // ---------- 渲染 ----------
       function draw() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // 背景
         const skyGrad = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
         skyGrad.addColorStop(0, '#1a1a2e');
         skyGrad.addColorStop(1, '#16213e');
         ctx.fillStyle = skyGrad;
         ctx.fillRect(0, 0, canvas.width, GROUND_Y);
 
-        // 星星
         ctx.fillStyle = '#fff';
         for (let i = 0; i < 30; i++) {
           const sx = (i * 73) % canvas.width;
@@ -453,7 +449,6 @@
         }
         ctx.globalAlpha = 1;
 
-        // 地面
         ctx.fillStyle = '#0f0f1a';
         ctx.fillRect(0, GROUND_Y, canvas.width, canvas.height - GROUND_Y);
 
@@ -464,21 +459,11 @@
         ctx.lineTo(canvas.width, GROUND_Y);
         ctx.stroke();
 
-        // 绘制猫
-        if (cat.active && !cat.met) {
-          drawCat(cat.x, cat.y);
-        }
-
-        // 绘制火柴人
+        if (cat.active && !cat.met) drawCat(cat.x, cat.y);
         drawStickman();
-
-        // 绘制问号
-        if (questionMarkTime > 0) {
-          drawQuestionMark();
-        }
+        if (questionMarkTime > 0) drawQuestionMark();
       }
 
-      // 画火柴人 (带动画)
       function drawStickman() {
         const x = player.x;
         const groundY = player.y;
@@ -487,85 +472,90 @@
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 3;
         ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
         
         const headY = groundY - 50;
         const bodyTop = headY + 10;
         const bodyBottom = groundY - 20;
 
-        // ---- 计算手臂和腿部的位置 (基于状态) ----
         let leftArmX, leftArmY, rightArmX, rightArmY;
-        let leftLegX, leftLegY, rightLegX, rightLegY;
+        let leftKneeX, leftKneeY, leftFootX, leftFootY;
+        let rightKneeX, rightKneeY, rightFootX, rightFootY;
 
         if (player.state === 'walking') {
-          // 行走动画 (摆动四肢)
-          const swing = Math.sin(player.animTime) * 15;
+          const swing = Math.sin(player.animTime) * 10;
           
-          // 手臂
-          leftArmX = x - 15 * dir - swing * dir;
+          leftArmX = x - 12 * dir - swing * dir;
           leftArmY = bodyTop + 20;
-          rightArmX = x + 15 * dir + swing * dir;
+          rightArmX = x + 12 * dir + swing * dir;
           rightArmY = bodyTop + 20;
 
-          // 腿
-          leftLegX = x - 12 - swing;
-          leftLegY = groundY;
-          rightLegX = x + 12 + swing;
-          rightLegY = groundY;
+          leftKneeX = x - 8 - swing * 0.5;
+          leftKneeY = bodyBottom + 12;
+          leftFootX = x - 10 - swing;
+          leftFootY = groundY;
+
+          rightKneeX = x + 8 + swing * 0.5;
+          rightKneeY = bodyBottom + 12;
+          rightFootX = x + 10 + swing;
+          rightFootY = groundY;
 
         } else if (player.state === 'confused') {
-          // 疑惑动作 (一只手绕头)
-          const scratch = Math.sin(Date.now() / 100) * 5; // 快速小幅摆动
+          const scratch = Math.sin(Date.now() / 100) * 5;
           
-          // 左手放下
           leftArmX = x - 10 * dir;
           leftArmY = bodyTop + 20;
-          
-          // 右手抬起绕头
           rightArmX = x + 10 * dir + scratch;
-          rightArmY = headY + 5; // 手在头顶附近
+          rightArmY = headY + 5;
 
-          // 腿站直
-          leftLegX = x - 12;
-          leftLegY = groundY;
-          rightLegX = x + 12;
-          rightLegY = groundY;
+          leftKneeX = x - 6;
+          leftKneeY = bodyBottom + 12;
+          leftFootX = x - 10;
+          leftFootY = groundY;
+
+          rightKneeX = x + 6;
+          rightKneeY = bodyBottom + 12;
+          rightFootX = x + 10;
+          rightFootY = groundY;
 
         } else {
-          // 站立待机
           leftArmX = x - 15 * dir;
           leftArmY = bodyTop + 20;
           rightArmX = x + 15 * dir;
           rightArmY = bodyTop + 20;
           
-          leftLegX = x - 12;
-          leftLegY = groundY;
-          rightLegX = x + 12;
-          rightLegY = groundY;
+          leftKneeX = x - 6;
+          leftKneeY = bodyBottom + 12;
+          leftFootX = x - 10;
+          leftFootY = groundY;
+
+          rightKneeX = x + 6;
+          rightKneeY = bodyBottom + 12;
+          rightFootX = x + 10;
+          rightFootY = groundY;
         }
 
-        // ---- 绘制 ----
-        // 头
         ctx.beginPath();
         ctx.arc(x, headY, 8, 0, Math.PI * 2);
         ctx.stroke();
 
-        // 身体
         ctx.beginPath();
         ctx.moveTo(x, bodyTop);
         ctx.lineTo(x, bodyBottom);
         ctx.stroke();
 
-        // 腿
         ctx.beginPath();
         ctx.moveTo(x, bodyBottom);
-        ctx.lineTo(leftLegX, leftLegY);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(x, bodyBottom);
-        ctx.lineTo(rightLegX, rightLegY);
+        ctx.lineTo(leftKneeX, leftKneeY);
+        ctx.lineTo(leftFootX, leftFootY);
         ctx.stroke();
 
-        // 手臂
+        ctx.beginPath();
+        ctx.moveTo(x, bodyBottom);
+        ctx.lineTo(rightKneeX, rightKneeY);
+        ctx.lineTo(rightFootX, rightFootY);
+        ctx.stroke();
+
         ctx.beginPath();
         ctx.moveTo(x, bodyTop + 8);
         ctx.lineTo(leftArmX, leftArmY);
@@ -576,7 +566,6 @@
         ctx.lineTo(rightArmX, rightArmY);
         ctx.stroke();
 
-        // 疑惑时画出汗滴或线条增强效果 (可选)
         if (player.state === 'confused') {
           ctx.beginPath();
           ctx.moveTo(x + 12, headY - 12);
@@ -585,21 +574,18 @@
         }
       }
 
-      // 画问号
       function drawQuestionMark() {
         const x = player.x + (player.dir === 1 ? 15 : -25);
-        const y = player.y - 80 + Math.sin(Date.now() / 200) * 5; // 上下浮动
+        const y = player.y - 80 + Math.sin(Date.now() / 200) * 5;
         
         ctx.fillStyle = '#ffcc66';
         ctx.font = 'bold 28px system-ui, sans-serif';
         ctx.fillText('?', x, y);
       }
 
-      // 画猫
       function drawCat(x, groundY) {
         const catY = groundY - 25;
         
-        // 身体
         ctx.fillStyle = '#000';
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2;
@@ -609,13 +595,11 @@
         ctx.fill();
         ctx.stroke();
 
-        // 头
         ctx.beginPath();
         ctx.arc(x - 10, catY, 10, 0, Math.PI * 2);
         ctx.fill();
         ctx.stroke();
 
-        // 耳朵
         ctx.beginPath();
         ctx.moveTo(x - 18, catY - 6);
         ctx.lineTo(x - 22, catY - 16);
@@ -630,7 +614,6 @@
         ctx.fill();
         ctx.stroke();
 
-        // 眼睛
         ctx.fillStyle = '#ffcc00';
         ctx.beginPath();
         ctx.arc(x - 13, catY - 2, 2, 0, Math.PI * 2);
@@ -639,7 +622,6 @@
         ctx.arc(x - 7, catY - 2, 2, 0, Math.PI * 2);
         ctx.fill();
 
-        // 尾巴
         ctx.strokeStyle = '#000';
         ctx.lineWidth = 4;
         ctx.beginPath();
@@ -653,7 +635,6 @@
         ctx.quadraticCurveTo(x + 30, catY, x + 35, catY - 10);
         ctx.stroke();
 
-        // 胡须
         ctx.strokeStyle = '#fff';
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -666,11 +647,9 @@
         ctx.stroke();
       }
 
-      // ---------- 主循环 ----------
       let lastTime = performance.now();
-      
       function gameLoop(time) {
-        const dt = Math.min((time - lastTime) / 1000, 0.1); // 限制最大步长
+        const dt = Math.min((time - lastTime) / 1000, 0.1);
         lastTime = time;
         
         update(dt);
@@ -678,16 +657,9 @@
         requestAnimationFrame(gameLoop);
       }
 
-      // ---------- 控制绑定 ----------
       window.addEventListener('keydown', (e) => {
-        if (e.key === 'ArrowLeft' || e.key === 'a') {
-          keys.left = true;
-          e.preventDefault();
-        }
-        if (e.key === 'ArrowRight' || e.key === 'd') {
-          keys.right = true;
-          e.preventDefault();
-        }
+        if (e.key === 'ArrowLeft' || e.key === 'a') { keys.left = true; e.preventDefault(); }
+        if (e.key === 'ArrowRight' || e.key === 'd') { keys.right = true; e.preventDefault(); }
       });
 
       window.addEventListener('keyup', (e) => {
@@ -709,7 +681,6 @@
       bindBtn(btnLeft, 'left');
       bindBtn(btnRight, 'right');
 
-      // 启动
       init();
 
     })();
